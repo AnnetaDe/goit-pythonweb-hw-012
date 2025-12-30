@@ -1,5 +1,10 @@
 # tests/test_roles.py
+from http.client import HTTPException
+
 import pytest
+
+from contacts_api.app.models import User
+
 
 @pytest.mark.asyncio
 async def test_make_admin_forbidden_for_user(client, token_user, user_user):
@@ -12,3 +17,9 @@ async def test_make_admin_allowed_for_admin(client, token_admin, user_user):
     headers = {"Authorization": f"Bearer {token_admin}"}
     r = await client.post(f"/api/auth/make-admin/{user_user.id}", headers=headers)
     assert r.status_code == 200
+
+
+
+
+
+
