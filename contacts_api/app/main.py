@@ -12,7 +12,7 @@ from contacts_api.app.routes_auth import router as auth_router, ratelimit_handle
 
 from contacts_api.app.limiter_config import limiter
 
-app = FastAPI()
+app = FastAPI(redirect_slashes=False)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 app.add_exception_handler(RateLimitExceeded, ratelimit_handler)

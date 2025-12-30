@@ -7,7 +7,7 @@ from contacts_api.app.cloudinary_utils import upload_avatar
 from contacts_api.app.database import get_db
 from contacts_api.app.models import User
 from contacts_api.app.schemas import UserCreate, UserResponse, Token
-from pydantic import EmailStr
+from pydantic import EmailStr, BaseModel
 from fastapi import Body
 from contacts_api.app.auth import hash_password, verify_password
 from contacts_api.app.jwt_utils import (
@@ -24,6 +24,10 @@ from contacts_api.app.limiter_config import limiter
 router = APIRouter(tags=["Authentication"])
 
 
+class SignupResponse(BaseModel):
+    user: UserResponse
+
+
 def ratelimit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
         status_code=429,
@@ -31,7 +35,7 @@ def ratelimit_handler(request: Request, exc: RateLimitExceeded):
     )
 
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
     user_data: UserCreate,
     background_tasks: BackgroundTasks,
@@ -56,19 +60,30 @@ async def register_user(
     token = create_email_token(new_user.email)
     background_tasks.add_task(send_verification_email, new_user.email, token)
 
-    return new_user
+    return {"user": new_user}
 
 
 @router.post("/login", response_model=Token)
-async def login_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == user_data.email))
+async def login_user(request: Request, db: AsyncSession = Depends(get_db)):
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "application/json" in content_type:
+        payload = await request.json()
+        email = payload.get("email")
+        password = payload.get("password")
+    else:
+        form = await request.form()
+        email = form.get("email") or form.get("username")
+        password = form.get("password")
+
+    if not email or not password:
+        raise HTTPException(status_code=422, detail="Email and password are required")
+
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(user_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
-        )
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -88,6 +103,22 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     return {"message": "Email verified successfully!"}
 
 
+async def create_user(user_in, db):
+    exists = (await db.execute(select(User).where(User.email == user_in.email))).scalar_one_or_none()
+    if exists:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    u = User(
+        email=user_in.email,
+        hashed_password=hash_password(user_in.password),
+        is_verified=False,
+        role="user",
+    )
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    return u
+
 @router.get("/me", response_model=UserResponse)
 @limiter.limit("5/minute")
 async def get_my_profile(
@@ -102,13 +133,12 @@ async def get_my_profile(
     return current_user
 
 
-
 @router.post("/avatar", response_model=UserResponse)
 async def update_avatar(
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(admin_required) 
+    current_user: User = Depends(admin_required)
 ):
     if not current_user.is_verified:
         raise HTTPException(status_code=403, detail="Email not verified")
@@ -121,6 +151,7 @@ async def update_avatar(
     await db.refresh(current_user)
 
     return current_user
+
 
 @router.post("/request-password-reset")
 async def request_password_reset(
@@ -135,8 +166,8 @@ async def request_password_reset(
         token = create_email_token(user.email)
         background_tasks.add_task(send_password_reset_email, user.email, token)
 
-    # Повертаємо завжди успішно — щоб не дати знати, чи email зареєстрований
     return {"message": "If the email is registered, reset instructions will be sent."}
+
 
 @router.post("/reset-password/{token}")
 async def reset_password(
@@ -160,11 +191,12 @@ async def reset_password(
 
     return {"message": "Password reset successfully."}
 
+
 @router.post("/make-admin/{user_id}")
 async def make_user_admin(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(admin_required),  # 🔐 лише admin
+    _: User = Depends(admin_required),
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

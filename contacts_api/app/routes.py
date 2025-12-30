@@ -4,32 +4,39 @@ from typing import List
 
 from contacts_api.app import crud
 from contacts_api.app.database import get_db
-from contacts_api.app.schemas import ContactCreate, ContactUpdate, ContactOut, UserCreate, UserResponse
+from contacts_api.app.schemas import ContactCreate, ContactUpdate, ContactOut
 from contacts_api.app.dependencies import get_current_user
 from contacts_api.app.models import User
-from contacts_api.app.crud import create_user
 
 router = APIRouter(prefix="/api/contacts", tags=["Contacts"])
 
 
+
+@router.post("", response_model=ContactOut, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ContactOut, status_code=status.HTTP_201_CREATED)
 async def create_contact(
     contact: ContactCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     return await crud.create_contact(contact, db, current_user)
 
-
+@router.get("", response_model=List[ContactOut])
 @router.get("/", response_model=List[ContactOut])
 async def get_contacts(
     skip: int = 0,
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     return await crud.get_contacts(skip, limit, db, current_user)
 
+@router.get("/birthdays", response_model=List[ContactOut])
+async def upcoming_birthdays(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return await crud.get_upcoming_birthdays(db, current_user)
 
 @router.get("/{contact_id}", response_model=ContactOut)
 async def get_contact_by_id(
@@ -76,13 +83,4 @@ async def search_contacts(
     return await crud.search_contacts(query, db, current_user)
 
 
-@router.get("/birthdays/upcoming", response_model=List[ContactOut])
-async def upcoming_birthdays(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    return await crud.get_upcoming_birthdays(db, current_user)
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(user: UserCreate, db: AsyncSession = Depends(get_db)):
-    return await create_user(user, db)

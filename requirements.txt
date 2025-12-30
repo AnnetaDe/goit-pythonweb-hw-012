@@ -5,6 +5,7 @@ asyncpg
 alembic
 pydantic[email]
 passlib[bcrypt]
+bcrypt==3.2.2
 python-dotenv
 slowapi
 python-multipart
