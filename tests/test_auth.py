@@ -19,21 +19,18 @@ async def test_signup_success():
 async def test_login_success():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # ensure user exists
-        await ac.post("/api/auth/login", json={
+        await ac.post("/api/auth/signup", json={
             "email": "test@example.com",
-            "password": "string123"
+            "password": "string123",
         })
 
-        response = await ac.post(
-            "/api/auth/login",
-            data={"email": "test@example.com", "password": "string123"},
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        response = await ac.post("/api/auth/login", data={
+            "email": "test@example.com",
+            "password": "string123",
+        })
 
     assert response.status_code == 200
     assert "access_token" in response.json()
-
 
 @pytest.mark.asyncio
 async def test_login_invalid_password():
@@ -78,7 +75,6 @@ async def test_signup_conflict(client):
     await client.post("/api/auth/signup", json={"email": email, "password": "string123"})
     r = await client.post("/api/auth/signup", json={"email": email, "password": "string123"})
     assert r.status_code == 409
-
 @pytest.mark.asyncio
 async def test_login_invalid_credentials(client):
     r = await client.post("/api/auth/login", json={"email": "nope@example.com", "password": "wrong123"})
@@ -98,3 +94,17 @@ async def test_verify_email_success(client):
     token = create_email_token(email)
     r = await client.get(f"/api/auth/verify-email/{token}")
     assert r.status_code == 200
+
+@pytest.mark.asyncio
+async def test_signup_conflict_email(client: AsyncClient):
+    await client.post("/api/auth/signup", json={"email": "dup@example.com", "password": "string123"})
+    r = await client.post("/api/auth/signup", json={"email": "dup@example.com", "password": "string123"})
+    assert r.status_code in (400, 409)
+
+
+@pytest.mark.asyncio
+async def test_login_invalid_credentials_401(client: AsyncClient):
+    r = await client.post("/api/auth/login", json={"email": "nope@example.com", "password": "wrong123"})
+    assert r.status_code == 401
+
+

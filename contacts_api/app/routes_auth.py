@@ -67,6 +67,9 @@ async def register_user(
 async def login_user(request: Request, db: AsyncSession = Depends(get_db)):
     content_type = (request.headers.get("content-type") or "").lower()
 
+    email = None
+    password = None
+
     if "application/json" in content_type:
         payload = await request.json()
         email = payload.get("email")
@@ -77,17 +80,17 @@ async def login_user(request: Request, db: AsyncSession = Depends(get_db)):
         password = form.get("password")
 
     if not email or not password:
-        raise HTTPException(status_code=422, detail="Email and password are required")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email and password are required",
+        )
 
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}
-
 
 @router.get("/verify-email/{token}")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
