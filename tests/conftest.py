@@ -3,15 +3,12 @@ import os
 import uuid
 
 import pytest
+import redis.asyncio as redis
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import update, text
+from sqlalchemy import text, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from contacts_api.app.jwt_utils import create_access_token
-from contacts_api.app.models import User
-from contacts_api.app import  routes_auth
-
-# IMPORTANT: set env BEFORE importing app/database/jwt_utils
+# IMPORTANT: set env BEFORE importing app/*
 os.environ.setdefault("ENV", "test")
 os.environ.setdefault(
     "TEST_DATABASE_URL",
@@ -21,9 +18,27 @@ os.environ.setdefault("SECRET_KEY", os.getenv("SECRET_KEY", "secret-key"))
 os.environ.setdefault("ALGORITHM", os.getenv("ALGORITHM", "HS256"))
 os.environ.setdefault("ACCESS_TOKEN_EXPIRE_MINUTES", os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
+# ---- Redis (define early) ----
+REDIS_URL = os.getenv("REDIS_URL", "redis://contacts_redis:6379/0")
+
+@pytest.fixture(scope="session")
+async def redis_client():
+    r = redis.from_url(REDIS_URL, decode_responses=True)
+    yield r
+    await r.aclose()
+
+@pytest.fixture(scope="function", autouse=True)
+async def _clean_redis(redis_client):
+    await redis_client.flushdb()
+    yield
+    await redis_client.flushdb()
+
+# ---- App imports after env ----
 from contacts_api.app.main import app
 from contacts_api.app.database import get_db
-from contacts_api.app.models import Base  # Base = declarative_base()
+from contacts_api.app.models import Base, User
+from contacts_api.app.jwt_utils import create_access_token
+from contacts_api.app import routes_auth
 
 
 @pytest.fixture(scope="session")
@@ -74,10 +89,12 @@ async def client():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
+
 @pytest.fixture(scope="function", autouse=True)
 def _mock_email(monkeypatch):
     monkeypatch.setattr(routes_auth, "send_verification_email", lambda *args, **kwargs: None)
     monkeypatch.setattr(routes_auth, "send_password_reset_email", lambda *args, **kwargs: None)
+
 
 @pytest.fixture
 async def auth_user(client: AsyncClient):
@@ -118,12 +135,12 @@ async def get_token(client: AsyncClient):
 @pytest.fixture
 async def user_user(db_session: AsyncSession):
     email = f"user-{uuid.uuid4().hex}@example.com"
-
     u = User(email=email, hashed_password="x", is_verified=True, role="user")
     db_session.add(u)
     await db_session.commit()
     await db_session.refresh(u)
     return u
+
 
 @pytest.fixture
 async def user_admin(db_session: AsyncSession):
@@ -134,13 +151,16 @@ async def user_admin(db_session: AsyncSession):
     await db_session.refresh(u)
     return u
 
+
 @pytest.fixture
 async def token_user(user_user):
     return create_access_token(data={"sub": str(user_user.id)})
 
+
 @pytest.fixture
 async def token_admin(user_admin):
     return create_access_token(data={"sub": str(user_admin.id)})
+
 
 @pytest.fixture(scope="function", autouse=True)
 async def _clean_db(db_session: AsyncSession):

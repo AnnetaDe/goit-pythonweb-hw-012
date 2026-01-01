@@ -176,7 +176,6 @@ async def test_login_422_missing_fields(client):
 
 @pytest.mark.asyncio
 async def test_verify_email_user_not_found(client, monkeypatch):
-    # force token decode to some email that is NOT in DB
     monkeypatch.setattr("contacts_api.app.routes_auth.decode_email_token", lambda t: "missing@example.com")
     r = await client.get("/api/auth/verify-email/whatever")
     assert r.status_code == 404
@@ -186,7 +185,6 @@ async def test_verify_email_user_not_found(client, monkeypatch):
 async def test_me_forbidden_if_not_verified(client):
     email = "notverified@example.com"
     await client.post("/api/auth/signup", json={"email": email, "password": "string123"})
-    # login should work but /me should be 403 (not verified)
     login = await client.post("/api/auth/login", json={"email": email, "password": "string123"})
     assert login.status_code == 200
     token = login.json()["access_token"]

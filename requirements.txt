@@ -16,3 +16,4 @@ pytest-asyncio
 pytest-cov
 httpx
 python-jose
+redis>=5.0.0

@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks, Request, File, UploadFile
+from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.responses import JSONResponse
+
+from contacts_api.app.cache import set_cached_user
 from contacts_api.app.cloudinary_utils import upload_avatar
 
 from contacts_api.app.database import get_db
@@ -67,9 +70,6 @@ async def register_user(
 async def login_user(request: Request, db: AsyncSession = Depends(get_db)):
     content_type = (request.headers.get("content-type") or "").lower()
 
-    email = None
-    password = None
-
     if "application/json" in content_type:
         payload = await request.json()
         email = payload.get("email")
@@ -80,15 +80,15 @@ async def login_user(request: Request, db: AsyncSession = Depends(get_db)):
         password = form.get("password")
 
     if not email or not password:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Email and password are required",
-        )
+        raise HTTPException(status_code=422, detail="Email and password are required")
 
-    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    stmt = select(User).where(User.email == email)
+    user = await db.scalar(stmt)
+
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    # IMPORTANT: do NOT auto-verify here, do NOT auto-create user here
     access_token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -122,17 +122,12 @@ async def create_user(user_in, db):
     await db.refresh(u)
     return u
 
+
 @router.get("/me", response_model=UserResponse)
 @limiter.limit("5/minute")
-async def get_my_profile(
-    request: Request,
-    current_user: User = Depends(get_current_user)
-):
+async def get_my_profile(request: Request, current_user: User = Depends(get_current_user)):
     if not current_user.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email not verified"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
     return current_user
 
 
